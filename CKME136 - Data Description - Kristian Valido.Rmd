@@ -1,0 +1,48 @@
+---
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+
+# CKME 136 Data Description
+
+# Dataset
+
+```{r}
+data <- read.csv(file="https://data.ontario.ca/dataset/f4112442-bdc8-45d2-be3c-12efae72fb27/resource/455fd63b-603d-4608-8216-7d8647f43350/download/conposcovidloc.csv",header=T,sep=",")
+
+#summary statistics of dataset
+summary(data)
+str(data)
+
+```
+
+# Approach
+
+# Step 1: Data Preparation
+
+```{r}
+#Find missing values in Outcome
+sum(is.na(data$Outcome1) == TRUE)
+length(data$Outcome1)
+
+#Find missing values in Outbreak_Related
+sum(is.na(data$Outbreak_Related) == TRUE)
+length(data$Outbreak_Related)
+
+#Find missing values in Age_Group
+sum(is.na(data$Age_Group) == TRUE)
+length(data$Age_Group)
+
+#Find missing values in Client_Gender
+sum(is.na(data$Client_Gender) == TRUE)
+length(data$Client_Gender)
+
+#Remove all remaining records with missing values
+dataclean <- na.omit(data)
+nrow(dataclean)
+
+#There is no missing data as all rows remain in the dataframe,
+```
+
