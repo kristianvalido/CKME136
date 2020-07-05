@@ -1,0 +1,194 @@
+---
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+
+# CKME 136 Initial Results
+
+# Step 1: Data Description
+
+```{r}
+#Read data into a dataframe
+data <- read.csv(file="https://data.ontario.ca/dataset/f4112442-bdc8-45d2-be3c-12efae72fb27/resource/455fd63b-603d-4608-8216-7d8647f43350/download/conposcovidloc.csv",header=T,sep=",",na.strings=c(""," ","NA"))
+
+#summary statistics of dataset
+summary(data)
+str(data)
+```
+
+# Step 1: Data Preparation
+
+```{r}
+#Find missing values in data
+sapply(data, function(x) sum(is.na(x)))
+sapply(data, function(x) length(unique(x)))
+
+#install.packages("Amelia")
+library(Amelia)
+missmap(data, main = "Missing values vs observed")
+#4% of data is missing
+
+#Outbreak Related has "missing values" but should be No
+sum(is.na(data$Outbreak_Related) == TRUE)
+length(data$Outbreak_Related)
+
+#Replace NA with No
+data$Outbreak_Related <- factor(data$Outbreak_Related, exclude = NULL, 
+               levels = c("Yes", NA), 
+               labels = c("Yes", "No"))
+table(data$Outbreak_Related, useNA = "always")
+str(data$Outbreak_Related)
+
+#summary statistics of clean dataset
+summary(data)
+str(data)
+
+#bar charts
+library(ggplot2)
+#Access ggplot-colors
+gg_color_hue <- function(n) {
+  hues = seq(15, 375, length=n+1)
+  hcl(h=hues, l=65, c=100)[1:n]
+}
+
+#create custom palette for Client Gender
+mycols <- gg_color_hue(length(unique(data$Client_Gender)))
+names(mycols) <- unique(data$Client_Gender)
+
+#stacked bar chart for Client Genders in Outcome
+ggplot(data, aes(x = factor(Outcome1), y = frequency(Outcome1), fill=Client_Gender)) + geom_bar(stat = 'identity') + scale_fill_manual(values = mycols)
+
+#Age Group stacked bar chart
+mycols <- gg_color_hue(length(unique(data$Age_Group)))
+names(mycols) <- unique(data$Age_Group)
+ggplot(data, aes(x = factor(Outcome1), y = frequency(Outcome1), fill=Age_Group)) + geom_bar(stat = 'identity') + scale_fill_manual(values = mycols)
+
+#Case Acquisition Info stacked bar chart
+mycols <- gg_color_hue(length(unique(data$Case_AcquisitionInfo)))
+names(mycols) <- unique(data$Case_AcquisitionInfo)
+ggplot(data, aes(x = factor(Outcome1), y = frequency(Outcome1), fill=Case_AcquisitionInfo)) + geom_bar(stat = 'identity') + scale_fill_manual(values = mycols)
+
+#Outbreak Related stacked bar chart
+mycols <- gg_color_hue(length(unique(data$Outbreak_Related)))
+names(mycols) <- unique(data$Outbreak_Related)
+ggplot(data, aes(x = factor(Outcome1), y = frequency(Outcome1), fill=Outbreak_Related)) + geom_bar(stat = 'identity') + scale_fill_manual(values = mycols)
+
+#Reporting City stacked bar chart
+mycols <- gg_color_hue(length(unique(data$Reporting_PHU_City)))
+names(mycols) <- unique(data$Reporting_PHU_City)
+ggplot(data, aes(x = factor(Outcome1), y = frequency(Outcome1), fill=Reporting_PHU_City)) + geom_bar(stat = 'identity') + scale_fill_manual(values = mycols)
+
+#install.packages("maps")
+#install.packages("mapdata")
+#install.packages("mapproj")
+library(maps)
+library(mapdata)
+library(mapproj)
+map(database = "worldHires", "Canada", xlim=c(-140,-110),ylim=c(48,64), col="grey80", fill=TRUE, projection="gilbert", orientation= c(90,0,225))
+lon <- c(data$Reporting_PHU_Longitude)
+lat <- c(data$Reporting_PHU_Latitude)
+coord <- mapproject(lon, lat, proj="gilbert", orientation=c(90, 0, 225))  #convert points to projected lat/long
+points(coord, pch=20, cex=1.2, col="red")
+```
+# Step 3: Experimental Design
+
+```{r}
+#Split data into training (10%) and test (90%) sets
+#createDataPartition function does stratified random sampling
+set.seed(100)
+#install.packages("caret")
+library(caret)
+trainingRows <- createDataPartition(data$Outcome1, p = 0.9, list = FALSE)
+training <- data[trainingRows,]
+test  <- data[-trainingRows,]
+```
+
+# Step 4: Modeling - (1) Logistic Regression
+
+```{r}
+#install.packages("nnet")
+library(nnet)
+#Fit training data into Multinomial Logistic Regression Model
+model.LogReg <- multinom(Outcome1 ~ Client_Gender + Age_Group + Case_AcquisitionInfo + Outbreak_Related + Reporting_PHU_City, data=training)
+summary (model.LogReg)
+
+#Predict on test data
+predicted.scores.test <- predict (model.LogReg, test, "probs")
+head(predicted.scores.test)
+
+predicted.class.test <- predict (model.LogReg, test)
+head(predicted.class.test)
+
+#Confusion Matrix
+confusion.matrix.table <- table(predicted.class.test, test$Outcome1)
+confusion.matrix.table
+
+# Precision and Recall for Fatal Class
+#precision = 8/(8+14) = 0.3636364
+#recall = 8/(8+260) = 0.02985075
+
+# Precision and Recall for Resolved Class
+#precision = 3107/(260+170+3107) = 0.878428
+#recall = 3107/(14+5+3107) = 0.9939219
+```
+
+# Step 4: Modeling - (2) Naive Bayes Classifier
+
+```{r}
+#install.packages("e1071")
+library(e1071)
+#install.packages("gmodels")
+library(gmodels)
+
+#Building model on training set
+NBC.classifier <- naiveBayes(training, training$Outcome1, laplace = 1)
+NBC.classifier
+
+#Confusion matrix
+NBC.predict <- predict(NBC.classifier, test)
+CrossTable(NBC.predict, test$Outcome1, prop.chisq = FALSE, prop.t = FALSE, prop.r = FALSE,
+dnn = c('predicted', 'actual'))
+
+# Precision and Recall for Fatal Class
+#precision = 263/(263+7) = 0.9740741
+#recall = 263/(263+1+4) = 0.9813433
+
+# Precision and Recall for Resolved Class
+#precision = 3103/(4+6+3103) = 0.9967877
+#recall = 3103/(23+3103) = 0.9926424
+```
+
+# Step 4: Modeling - (3) Random Forest
+
+```{r}
+#install.packages("randomForest")
+library(randomForest)
+
+#Building Random Forest model on training set
+model.randomForest <- randomForest(Outcome1 ~ Client_Gender + Age_Group + Case_AcquisitionInfo + Outbreak_Related + Reporting_PHU_City, data=training, importance = TRUE)
+model.randomForest
+
+#Predicting on test set
+predict.RF <- predict(model.randomForest, test, type = "class")
+head(predict.RF)
+
+#Confusion Matrix
+mean(predict.RF == test$Outcome1)
+table(predict.RF, test$Outcome1)
+
+# Precision and Recall for Fatal Class
+#precision = 1/(1+5) = 0.1666667
+#recall = 1/(1+267) = 0.003731343
+
+# Precision and Recall for Resolved Class
+#precision = 3112/(267+165+3112) = 0.8781038
+#recall = 3112/(5+9+3112) = 0.9955214
+
+#importance that model has assigned to each variable
+varImpPlot(model.randomForest)
+
+```
+
+
