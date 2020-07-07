@@ -1,0 +1,196 @@
+---
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+
+# CKME 136 Initial Results
+
+# Step 1: Data Description
+
+```{r}
+#Read data into a dataframe
+data <- read.csv(file="https://data.ontario.ca/dataset/f4112442-bdc8-45d2-be3c-12efae72fb27/resource/455fd63b-603d-4608-8216-7d8647f43350/download/conposcovidloc.csv",header=T,sep=",",na.strings=c(""," ","NA"))
+
+#summary statistics of dataset
+summary(data)
+str(data)
+```
+
+# Step 1: Data Preparation
+
+```{r}
+#Find missing values in data
+sapply(data, function(x) sum(is.na(x)))
+sapply(data, function(x) length(unique(x)))
+
+#install.packages("Amelia")
+library(Amelia)
+missmap(data, main = "Missing values vs observed")
+#4% of data is missing
+
+#Remove Not Resolved rows in Outcome1
+dataclean <- droplevels(data[!data$Outcome1 == 'Not Resolved',])
+
+#Outbreak Related has "missing values" but should be No
+sum(is.na(dataclean$Outbreak_Related) == TRUE)
+length(dataclean$Outbreak_Related)
+
+#Replace NA with No
+dataclean$Outbreak_Related <- factor(dataclean$Outbreak_Related, exclude = NULL, 
+               levels = c("Yes", NA), 
+               labels = c("Yes", "No"))
+table(dataclean$Outbreak_Related, useNA = "always")
+str(dataclean$Outbreak_Related)
+
+#Remove repetitive variables
+dataclean$Reporting_PHU <- NULL
+dataclean$Reporting_PHU_Address <- NULL
+dataclean$Reporting_PHU_Postal_Code <- NULL
+dataclean$Reporting_PHU_Website <- NULL
+
+#summary statistics of clean dataset
+summary(dataclean)
+str(dataclean)
+
+#bar charts
+library(ggplot2)
+#Access ggplot-colors
+gg_color_hue <- function(n) {
+  hues = seq(15, 375, length=n+1)
+  hcl(h=hues, l=65, c=100)[1:n]
+}
+
+#create custom palette for Client Gender
+mycols <- gg_color_hue(length(unique(dataclean$Client_Gender)))
+names(mycols) <- unique(dataclean$Client_Gender)
+
+#stacked bar chart for Client Genders in Outcome
+ggplot(dataclean, aes(x = factor(Outcome1), y = frequency(Outcome1), fill=Client_Gender)) + geom_bar(stat = 'identity') + scale_fill_manual(values = mycols)
+
+#Age Group stacked bar chart
+mycols <- gg_color_hue(length(unique(dataclean$Age_Group)))
+names(mycols) <- unique(dataclean$Age_Group)
+ggplot(dataclean, aes(x = factor(Outcome1), y = frequency(Outcome1), fill=Age_Group)) + geom_bar(stat = 'identity') + scale_fill_manual(values = mycols)
+
+#Case Acquisition Info stacked bar chart
+mycols <- gg_color_hue(length(unique(dataclean$Case_AcquisitionInfo)))
+names(mycols) <- unique(dataclean$Case_AcquisitionInfo)
+ggplot(dataclean, aes(x = factor(Outcome1), y = frequency(Outcome1), fill=Case_AcquisitionInfo)) + geom_bar(stat = 'identity') + scale_fill_manual(values = mycols)
+
+#Outbreak Related stacked bar chart
+mycols <- gg_color_hue(length(unique(dataclean$Outbreak_Related)))
+names(mycols) <- unique(dataclean$Outbreak_Related)
+ggplot(dataclean, aes(x = factor(Outcome1), y = frequency(Outcome1), fill=Outbreak_Related)) + geom_bar(stat = 'identity') + scale_fill_manual(values = mycols)
+
+#Reporting City stacked bar chart
+mycols <- gg_color_hue(length(unique(dataclean$Reporting_PHU_City)))
+names(mycols) <- unique(dataclean$Reporting_PHU_City)
+ggplot(dataclean, aes(x = factor(Outcome1), y = frequency(Outcome1), fill=Reporting_PHU_City)) + geom_bar(stat = 'identity') + scale_fill_manual(values = mycols)
+
+#install.packages("maps")
+#install.packages("mapdata")
+#install.packages("mapproj")
+library(maps)
+library(mapdata)
+library(mapproj)
+map(database = "worldHires", "Canada", xlim=c(-140,-110),ylim=c(48,64), col="grey80", fill=TRUE, projection="gilbert", orientation= c(90,0,225))
+lon <- c(dataclean$Reporting_PHU_Longitude)
+lat <- c(dataclean$Reporting_PHU_Latitude)
+coord <- mapproject(lon, lat, proj="gilbert", orientation=c(90, 0, 225))  #convert points to projected lat/long
+points(coord, pch=21, cex=1.2, col="red")
+
+```
+# Step 3: Experimental Design
+
+```{r}
+#Split data into training (10%) and test (90%) sets
+#createDataPartition function does stratified random sampling
+set.seed(100)
+#install.packages("caret")
+library(caret)
+trainingRows <- createDataPartition(dataclean$Outcome1, p = 0.9, list = FALSE)
+training <- dataclean[trainingRows,]
+test  <- dataclean[-trainingRows,]
+
+#see if proportion of training and test set are the same
+prop.table(table(training$Outcome1))
+prop.table(table(test$Outcome1))
+#proportions are the same
+```
+
+# Step 4: Modeling - (1) Logistic Regression
+
+```{r}
+#install.packages("caret")
+library(caret)
+#Fit training data into Multinomial Logistic Regression Model
+model.LogReg <- glm(Outcome1 ~ Client_Gender + Age_Group + Case_AcquisitionInfo + Outbreak_Related + Reporting_PHU_City, family = binomial(link = "logit"), data=training)
+summary (model.LogReg)
+
+#ANOVA test
+anova(model.LogReg, test="Chisq")
+
+#Predict on test data
+test.probs <- predict(model.LogReg, test, type = "response")
+pred.log <- rep("Fatal", length(test.probs))
+pred.log[test.probs>=0.5] <- "Resolved"
+
+#Confusion Matrix
+confusionMatrix(factor(pred.log),factor(test$Outcome1))
+
+#ROC Curve
+#install.packages("pROC")
+library(pROC)
+
+roc.curve <- roc(test$Outcome1, test.probs)
+print(roc.curve)
+
+plot(roc.curve, ylim=c(0,1), print.thres=TRUE)
+abline(h=1,col='blue',lwd=2)
+abline(h=0,col='red',lwd=2)
+```
+
+# Step 4: Modeling - (2) Naive Bayes Classifier
+
+```{r}
+#install.packages("e1071")
+library(e1071)
+#install.packages("gmodels")
+library(gmodels)
+
+#Building model on training set
+NBC.classifier <- naiveBayes(training, training$Outcome1, laplace = 1)
+NBC.classifier
+
+#Confusion matrix
+NBC.predict <- predict(NBC.classifier, test)
+CrossTable(NBC.predict, test$Outcome1, prop.chisq = FALSE, prop.t = FALSE, prop.r = FALSE,
+dnn = c('predicted', 'actual'))
+
+```
+
+# Step 4: Modeling - (3) Random Forest
+
+```{r}
+#install.packages("randomForest")
+library(randomForest)
+
+#Building Random Forest model on training set
+model.randomForest <- randomForest(Outcome1 ~ Client_Gender + Age_Group + Case_AcquisitionInfo + Outbreak_Related + Reporting_PHU_City, data=training, importance = TRUE)
+model.randomForest
+
+#Predicting on test set
+predict.RF <- predict(model.randomForest, test, type = "class")
+head(predict.RF)
+
+#Confusion Matrix
+table(predict.RF, test$Outcome1)
+
+#importance that model has assigned to each variable
+varImpPlot(model.randomForest)
+
+```
+
+
